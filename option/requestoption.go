@@ -11,15 +11,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/stainless-sdks/limrun-v1-go/internal/requestconfig"
+	"github.com/limrun-inc/go-sdk/internal/requestconfig"
 	"github.com/tidwall/sjson"
 )
 
-// RequestOption is an option for the requests made by the limrun-v1 API Client
+// RequestOption is an option for the requests made by the limrun API Client
 // which can be supplied to clients, services, and methods. You can read more about this functional
 // options pattern in our [README].
 //
-// [README]: https://pkg.go.dev/github.com/stainless-sdks/limrun-v1-go#readme-requestoptions
+// [README]: https://pkg.go.dev/github.com/limrun-inc/go-sdk#readme-requestoptions
 type RequestOption = requestconfig.RequestOption
 
 // WithBaseURL returns a RequestOption that sets the BaseURL for the client.
@@ -263,7 +263,7 @@ func WithRequestTimeout(dur time.Duration) RequestOption {
 // environment to be the "production" environment. An environment specifies which base URL
 // to use by default.
 func WithEnvironmentProduction() RequestOption {
-	return requestconfig.WithDefaultBaseURL("https://api.example.com/")
+	return requestconfig.WithDefaultBaseURL("https://api.limrun.com/")
 }
 
 // WithAPIKey returns a RequestOption that sets the client setting "api_key".

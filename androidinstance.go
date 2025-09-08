@@ -1,6 +1,6 @@
 // File generated from our OpenAPI spec by Stainless. See CONTRIBUTING.md for details.
 
-package limrunv1
+package limrun
 
 import (
 	"context"
@@ -10,16 +10,16 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/stainless-sdks/limrun-v1-go/internal/apijson"
-	"github.com/stainless-sdks/limrun-v1-go/internal/apiquery"
-	"github.com/stainless-sdks/limrun-v1-go/internal/requestconfig"
-	"github.com/stainless-sdks/limrun-v1-go/option"
-	"github.com/stainless-sdks/limrun-v1-go/packages/param"
-	"github.com/stainless-sdks/limrun-v1-go/packages/respjson"
+	"github.com/limrun-inc/go-sdk/internal/apijson"
+	"github.com/limrun-inc/go-sdk/internal/apiquery"
+	"github.com/limrun-inc/go-sdk/internal/requestconfig"
+	"github.com/limrun-inc/go-sdk/option"
+	"github.com/limrun-inc/go-sdk/packages/param"
+	"github.com/limrun-inc/go-sdk/packages/respjson"
 )
 
 // AndroidInstanceService contains methods and other services that help with
-// interacting with the limrun-v1 API.
+// interacting with the limrun API.
 //
 // Note, unlike clients, this service does not read variables from the environment
 // automatically. You should not instantiate this service directly, and instead use
@@ -152,8 +152,9 @@ func (r *AndroidInstanceSpec) UnmarshalJSON(data []byte) error {
 }
 
 type AndroidInstanceStatus struct {
-	Token                string `json:"token,required"`
-	State                any    `json:"state,required"`
+	Token string `json:"token,required"`
+	// Any of "unknown", "creating", "ready", "terminated".
+	State                string `json:"state,required"`
 	AdbWebSocketURL      string `json:"adbWebSocketUrl"`
 	EndpointWebSocketURL string `json:"endpointWebSocketUrl"`
 	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
@@ -293,7 +294,9 @@ type AndroidInstanceListParams struct {
 	// Region where the instance is scheduled on.
 	Region param.Opt[string] `query:"region,omitzero" json:"-"`
 	// State filter to apply to Android instances to return.
-	State any `query:"state,omitzero" json:"-"`
+	//
+	// Any of "unknown", "creating", "ready", "terminated".
+	State AndroidInstanceListParamsState `query:"state,omitzero" json:"-"`
 	paramObj
 }
 
@@ -305,3 +308,13 @@ func (r AndroidInstanceListParams) URLQuery() (v url.Values, err error) {
 		NestedFormat: apiquery.NestedQueryFormatBrackets,
 	})
 }
+
+// State filter to apply to Android instances to return.
+type AndroidInstanceListParamsState string
+
+const (
+	AndroidInstanceListParamsStateUnknown    AndroidInstanceListParamsState = "unknown"
+	AndroidInstanceListParamsStateCreating   AndroidInstanceListParamsState = "creating"
+	AndroidInstanceListParamsStateReady      AndroidInstanceListParamsState = "ready"
+	AndroidInstanceListParamsStateTerminated AndroidInstanceListParamsState = "terminated"
+)
