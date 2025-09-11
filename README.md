@@ -6,7 +6,7 @@
 
 <!-- x-release-please-end -->
 
-The Limrun Go library provides convenient access to the Limrun REST API
+The Limrun Go library provides convenient access to the [Limrun REST API](https://lim.run)
 from applications written in Go.
 
 It is generated with [Stainless](https://www.stainless.com/).
@@ -28,7 +28,7 @@ Or to pin the version:
 <!-- x-release-please-start-version -->
 
 ```sh
-go get -u 'github.com/limrun-inc/go-sdk@v0.2.0'
+go get -u 'github.com/limrun-inc/go-sdk@v0.3.0'
 ```
 
 <!-- x-release-please-end -->

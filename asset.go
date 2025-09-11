@@ -36,6 +36,15 @@ func NewAssetService(opts ...option.RequestOption) (r AssetService) {
 	return
 }
 
+// List organization's all assets with given filters. If none given, return all
+// assets.
+func (r *AssetService) List(ctx context.Context, query AssetListParams, opts ...option.RequestOption) (res *[]Asset, err error) {
+	opts = append(r.Options[:], opts...)
+	path := "v1/assets"
+	err = requestconfig.ExecuteNewRequest(ctx, http.MethodGet, path, query, &res, opts...)
+	return
+}
+
 // Get the asset with given ID.
 func (r *AssetService) Get(ctx context.Context, assetID string, query AssetGetParams, opts ...option.RequestOption) (res *Asset, err error) {
 	opts = append(r.Options[:], opts...)
@@ -44,15 +53,6 @@ func (r *AssetService) Get(ctx context.Context, assetID string, query AssetGetPa
 		return
 	}
 	path := fmt.Sprintf("v1/assets/%s", assetID)
-	err = requestconfig.ExecuteNewRequest(ctx, http.MethodGet, path, query, &res, opts...)
-	return
-}
-
-// List organization's all assets with given filters. If none given, return all
-// assets.
-func (r *AssetService) List(ctx context.Context, query AssetListParams, opts ...option.RequestOption) (res *[]Asset, err error) {
-	opts = append(r.Options[:], opts...)
-	path := "v1/assets"
 	err = requestconfig.ExecuteNewRequest(ctx, http.MethodGet, path, query, &res, opts...)
 	return
 }
@@ -119,6 +119,24 @@ func (r *AssetGetOrNewResponse) UnmarshalJSON(data []byte) error {
 	return apijson.UnmarshalRoot(data, r)
 }
 
+type AssetListParams struct {
+	// Toggles whether a download URL should be included in the response
+	IncludeDownloadURL param.Opt[bool] `query:"includeDownloadUrl,omitzero" json:"-"`
+	// Toggles whether an upload URL should be included in the response
+	IncludeUploadURL param.Opt[bool] `query:"includeUploadUrl,omitzero" json:"-"`
+	// Query by file name
+	NameFilter param.Opt[string] `query:"nameFilter,omitzero" json:"-"`
+	paramObj
+}
+
+// URLQuery serializes [AssetListParams]'s query parameters as `url.Values`.
+func (r AssetListParams) URLQuery() (v url.Values, err error) {
+	return apiquery.MarshalWithSettings(r, apiquery.QuerySettings{
+		ArrayFormat:  apiquery.ArrayQueryFormatComma,
+		NestedFormat: apiquery.NestedQueryFormatBrackets,
+	})
+}
+
 type AssetGetParams struct {
 	// Toggles whether a download URL should be included in the response
 	IncludeDownloadURL param.Opt[bool] `query:"includeDownloadUrl,omitzero" json:"-"`
@@ -129,26 +147,6 @@ type AssetGetParams struct {
 
 // URLQuery serializes [AssetGetParams]'s query parameters as `url.Values`.
 func (r AssetGetParams) URLQuery() (v url.Values, err error) {
-	return apiquery.MarshalWithSettings(r, apiquery.QuerySettings{
-		ArrayFormat:  apiquery.ArrayQueryFormatComma,
-		NestedFormat: apiquery.NestedQueryFormatBrackets,
-	})
-}
-
-type AssetListParams struct {
-	// Toggles whether a download URL should be included in the response
-	IncludeDownloadURL param.Opt[bool] `query:"includeDownloadUrl,omitzero" json:"-"`
-	// Toggles whether an upload URL should be included in the response
-	IncludeUploadURL param.Opt[bool] `query:"includeUploadUrl,omitzero" json:"-"`
-	// Query by file md5
-	Md5Filter param.Opt[string] `query:"md5Filter,omitzero" json:"-"`
-	// Query by file name
-	NameFilter param.Opt[string] `query:"nameFilter,omitzero" json:"-"`
-	paramObj
-}
-
-// URLQuery serializes [AssetListParams]'s query parameters as `url.Values`.
-func (r AssetListParams) URLQuery() (v url.Values, err error) {
 	return apiquery.MarshalWithSettings(r, apiquery.QuerySettings{
 		ArrayFormat:  apiquery.ArrayQueryFormatComma,
 		NestedFormat: apiquery.NestedQueryFormatBrackets,
