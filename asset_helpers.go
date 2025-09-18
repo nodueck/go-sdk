@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/md5"
 	"fmt"
+	"github.com/limrun-inc/go-sdk/packages/param"
 	"io"
 	"net/http"
 	"os"
@@ -14,18 +15,22 @@ import (
 
 type AssetGetOrUploadParams struct {
 	// Name of the asset. If not given, file name of the given file is used.
-	Name *string
+	Name param.Opt[string]
 
 	// Path to the file to upload.
 	Path string
+
+	// ProgressWriter is an optional io.Writer to track upload progress.
+	// If provided, upload progress will be written to this writer.
+	ProgressWriter io.Writer
 }
 
 // GetOrUpload makes sure the given file is either uploaded or validates that it was uploaded and return a working
 // download URL in either case.
 func (r *AssetService) GetOrUpload(ctx context.Context, body AssetGetOrUploadParams, opts ...option.RequestOption) (res *AssetGetOrNewResponse, err error) {
 	name := path.Base(body.Path)
-	if body.Name != nil && len(*body.Name) > 0 {
-		name = *body.Name
+	if body.Name.Value != "" {
+		name = body.Name.Value
 	}
 	localFile, err := os.Open(body.Path)
 	if err != nil {
@@ -53,13 +58,18 @@ func (r *AssetService) GetOrUpload(ctx context.Context, body AssetGetOrUploadPar
 			return nil, fmt.Errorf("failed to reset localFile pointer: %w", err)
 		}
 	}
-	uploadReq, err := http.NewRequestWithContext(ctx, http.MethodPut, result.SignedUploadURL, localFile)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create upload request: %w", err)
-	}
 	stat, err := localFile.Stat()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get localFile info: %w", err)
+	}
+	var requestBody io.Reader = localFile
+	// If progress writer is provided, use TeeReader to track progress
+	if body.ProgressWriter != nil {
+		requestBody = io.TeeReader(localFile, body.ProgressWriter)
+	}
+	uploadReq, err := http.NewRequestWithContext(ctx, http.MethodPut, result.SignedUploadURL, requestBody)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create upload request: %w", err)
 	}
 	uploadReq.ContentLength = stat.Size()
 	uploadReq.Header.Set("Content-Type", "application/octet-stream")
