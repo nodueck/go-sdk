@@ -2,8 +2,12 @@ package main
 
 import (
 	"context"
+	"io/fs"
 	"log"
 	"os"
+	"path/filepath"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/limrun-inc/go-sdk"
@@ -13,27 +17,60 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		log.Fatal("Need to provide a path to a file to run")
+		log.Fatal("Need to provide path to APK file or directory that contains APK files")
 	}
-	apkPath := os.Args[1]
+	givenPath := os.Args[1]
 	token := os.Getenv("LIM_TOKEN") // lim_yourtoken
 	lim := limrun.NewClient(option.WithAPIKey(token))
-
 	ctx := context.TODO()
-	initUpl := time.Now()
-	asset, err := lim.Assets.GetOrUpload(ctx, limrun.AssetGetOrUploadParams{
-		Path: apkPath,
-	})
-	if err != nil {
-		log.Fatalf("failed to upload asset to limrun: %s", err)
+
+	// Figure out all the file paths.
+	var apkPaths []string
+	if err := filepath.WalkDir(givenPath, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if !strings.HasSuffix(d.Name(), ".apk") {
+			return nil
+		}
+		log.Printf("Will install %s\n", d.Name())
+		apkPaths = append(apkPaths, path)
+		return nil
+	}); err != nil {
+		log.Fatal(err)
 	}
-	log.Printf("Uploaded %s in %s", apkPath, time.Since(initUpl))
+
+	// Make sure all files are uploaded.
+	var names []string
+	var wg sync.WaitGroup
+	for _, apkPath := range apkPaths {
+		wg.Add(1)
+		initUpl := time.Now()
+		go func() {
+			asset, err := lim.Assets.GetOrUpload(ctx, limrun.AssetGetOrUploadParams{
+				Path: apkPath,
+			})
+			if err != nil {
+				log.Fatalf("failed to upload asset to limrun: %s", err)
+			}
+			names = append(names, asset.Name)
+			log.Printf("Uploaded %s in %s", apkPath, time.Since(initUpl))
+			wg.Done()
+		}()
+	}
+	wg.Wait()
+
+	// Create the instance with the uploaded assets.
+	log.Printf("Using %d files", len(names))
 	spec := limrun.AndroidInstanceNewParamsSpec{
 		InitialAssets: []limrun.AndroidInstanceNewParamsSpecInitialAsset{
 			{
-				Kind:      "App",
-				Source:    "AssetName",
-				AssetName: param.NewOpt(asset.Name),
+				Kind:       "App",
+				Source:     "AssetNames",
+				AssetNames: names,
 			},
 		},
 	}
@@ -45,7 +82,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to create android instance: %s", err)
 	}
-	log.Printf("Created android instance with %s pre-installed in %s", asset.Name, time.Since(init))
+	log.Printf("Created android instance pre-installed %d APKs in %s", len(names), time.Since(init))
 	log.Printf("Connection URL: %s", instance.Status.EndpointWebSocketURL)
 	log.Printf("Connection token: %s", instance.Status.Token)
 }
