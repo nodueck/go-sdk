@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"os/exec"
 	"time"
 
@@ -20,20 +21,50 @@ func WithADBPath(p string) Option {
 	}
 }
 
+// WithAutoConnect allows enabling/disabling the internal `adb connect <Addr()>` call
+// after the TCP listener is up. In Kubernetes/remote mode set this to false so that
+// an external client can take the single available connection.
+func WithAutoConnect(b bool) Option {
+	return func(t *Tunnel) {
+		t.AutoConnect = b
+	}
+}
+
+// WithAdvertiseHost sets the host part used by Addr(). If empty, Addr() falls
+// back to "127.0.0.1" (local dev). In Kubernetes set this to your Service FQDN,
+// e.g. "deviceapi-hl.droidrun.svc.cluster.local".
+func WithAdvertiseHost(h string) Option {
+	return func(t *Tunnel) {
+		t.AdvertiseHost = h
+	}
+}
+
 type Option func(*Tunnel)
 
 // New returns a new Tunnel that will listen on an available port and converts Tunnel traffic into WebSocket.
 func New(remoteURL, token string, opts ...Option) (*Tunnel, error) {
-	listener, err := net.Listen("tcp", ":0")
+	listener, err := net.Listen("tcp4", "0.0.0.0:0")
 	if err != nil {
 		return nil, fmt.Errorf("creating a tcp listener failed: %w", err)
 	}
 	t := &Tunnel{
-		RemoteURL: remoteURL,
-		Token:     token,
-		ADBPath:   "adb",
-		listener:  listener,
+		RemoteURL:     remoteURL,
+		Token:         token,
+		ADBPath:       "adb",
+		AutoConnect:   true,
+		AdvertiseHost: "",
+		listener:      listener,
 	}
+
+	// TUNNEL_AUTOCONNECT=false  → AutoConnect off
+	// TUNNEL_ADVERTISE_HOST=... → set AdvertiseHost
+	if v := os.Getenv("TUNNEL_AUTOCONNECT"); v == "0" || v == "false" {
+		t.AutoConnect = false
+	}
+	if v := os.Getenv("TUNNEL_ADVERTISE_HOST"); v != "" {
+		t.AdvertiseHost = v
+	}
+
 	for _, f := range opts {
 		f(t)
 	}
@@ -52,12 +83,18 @@ type Tunnel struct {
 	// ADBPath is the path to adb executable. Defaults to just "adb".
 	ADBPath string
 
+	// AdvertiseHost is the host part used by Addr(). If empty, Addr() uses 127.0.0.1.
+	AdvertiseHost string
+
+	// AutoConnect controls whether Start() runs a local `adb connect Addr()`.
+	AutoConnect bool
+
 	listener net.Listener
 	cancel   context.CancelCauseFunc
 }
 
-// Start starts a tunnel to the Android instance through the given URL and notifies the local ADB to recognize
-// it.
+// Start starts a tunnel to the Android instance through the given URL and optionally
+// runs a local `adb connect Addr()` if AutoConnect is true.
 // It is non-blocking and continues to run in the background.
 // Call Close() method of the returned Tunnel to make sure it's properly cleaned up.
 func (t *Tunnel) Start() error {
@@ -66,15 +103,24 @@ func (t *Tunnel) Start() error {
 			log.Printf("failed to start TCP tunnel: %s", err)
 		}
 	}()
-	out, err := exec.CommandContext(context.Background(), t.ADBPath, "connect", t.Addr()).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("failed to connect adb: %w %s", err, string(out))
+
+	if t.AutoConnect {
+		out, err := exec.CommandContext(context.Background(), t.ADBPath, "connect", t.Addr()).CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("failed to connect adb: %w %s", err, string(out))
+		}
 	}
 	return nil
 }
 
+// Addr returns the advertised host:port for clients.
+// In cluster set AdvertiseHost to a Service FQDN; locally it falls back to 127.0.0.1.
 func (t *Tunnel) Addr() string {
-	return fmt.Sprintf("127.0.0.1:%d", t.listener.Addr().(*net.TCPAddr).Port)
+	host := t.AdvertiseHost
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	return fmt.Sprintf("%s:%d", host, t.listener.Addr().(*net.TCPAddr).Port)
 }
 
 // Close closes the underlying Tunnel listener.
@@ -86,26 +132,19 @@ func (t *Tunnel) Close() {
 
 // startTunnel starts the local Tunnel server to forward to WebSocket.
 // Blocks until connection is closed.
-// Cancel the context or call Close() when you'd like to stop this tunnel.
-//
-// You can optionally provide ready channel so that tunnel sends "true" when it's ready to accept connections,
-// e.g. you can call "adb connect" after that message.
+// Single-client semantics: we accept exactly one TCP connection, then pump bytes TCP<->WS until close.
 func (t *Tunnel) startTunnel() error {
 	tCtx, cancel := context.WithCancelCause(context.Background())
 	t.cancel = cancel
 	defer cancel(nil)
 
-	defer func() {
-		_ = t.listener.Close()
-	}()
+	defer func() { _ = t.listener.Close() }()
 
 	tcpConn, err := t.listener.Accept()
 	if err != nil {
 		return fmt.Errorf("failed to accept connection: %w", err)
 	}
-	defer func() {
-		_ = tcpConn.Close()
-	}()
+	defer func() { _ = tcpConn.Close() }()
 
 	ws, _, err := websocket.DefaultDialer.Dial(t.RemoteURL, http.Header{
 		"Authorization": []string{fmt.Sprintf("Bearer %s", t.Token)},
@@ -113,10 +152,9 @@ func (t *Tunnel) startTunnel() error {
 	if err != nil {
 		return fmt.Errorf("failed to dial remote websocket server: %w", err)
 	}
-	defer func() {
-		_ = ws.Close()
-	}()
+	defer func() { _ = ws.Close() }()
 
+	// keepalive ping
 	go func() {
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
@@ -133,6 +171,7 @@ func (t *Tunnel) startTunnel() error {
 		}
 	}()
 
+	// TCP → WS
 	go func() {
 		// 32Kb is default frame size.
 		buffer := make([]byte, 32*1024)
@@ -163,6 +202,7 @@ func (t *Tunnel) startTunnel() error {
 		}
 	}()
 
+	// WS → TCP
 	go func() {
 		for {
 			select {
